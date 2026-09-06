@@ -5,6 +5,7 @@ final class BacksideCoordinator: NSObject {
     private let store: NoteStore
     private var panels: [String: ScratchpadPanel] = [:]
     private var trackingTimer: Timer?
+    private lazy var library = NoteLibraryWindowController(store: store)
 
     init(store: NoteStore) {
         self.store = store
@@ -30,6 +31,8 @@ final class BacksideCoordinator: NSObject {
     }
 
     func hideAll() { panels.values.forEach { $0.hide(animated: false) } }
+
+    func showLibrary() { library.showWindow(nil) }
 
     @objc private func trackPanels() {
         panels = panels.filter { _, panel in

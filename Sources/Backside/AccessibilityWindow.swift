@@ -6,6 +6,8 @@ struct TargetWindow: Hashable {
     let pid: pid_t
     let key: String
     let title: String
+    let appBundleID: String
+    let appName: String
 
     static func at(screenPoint: CGPoint) -> TargetWindow? {
         var hit: AXUIElement?
@@ -20,9 +22,11 @@ struct TargetWindow: Hashable {
         let title = string(window, kAXTitleAttribute) ?? "Untitled window"
         let number = numberAttribute(window, "AXWindowNumber") ?? 0
         let app = NSRunningApplication(processIdentifier: pid)
+        let appBundleID = app?.bundleIdentifier ?? "pid.\(pid)"
+        let appName = app?.localizedName ?? appBundleID
         // Window number distinguishes otherwise identically titled document windows for a session.
-        let key = "\(app?.bundleIdentifier ?? "pid.\(pid)")|\(number)|\(title)"
-        return TargetWindow(element: window, pid: pid, key: key, title: title)
+        let key = "\(appBundleID)|\(number)|\(title)"
+        return TargetWindow(element: window, pid: pid, key: key, title: title, appBundleID: appBundleID, appName: appName)
     }
 
     func frame() -> CGRect? {
@@ -80,7 +84,7 @@ struct TargetWindow: Hashable {
             guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success else { break }
             current = parent as! AXUIElement?
         }
-        guard let frame = TargetWindow(element: window, pid: 0, key: "", title: "").frame() else { return false }
+        guard let frame = TargetWindow(element: window, pid: 0, key: "", title: "", appBundleID: "", appName: "").frame() else { return false }
         // Unified title/toolbar apps commonly reserve 80–100 points. A 120 point header band
         // makes blank title bars and traffic-light areas reliable without making normal content
         // clicks accidental toggles.

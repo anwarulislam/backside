@@ -29,3 +29,9 @@ playground.xcworkspace
 # Local outputs / scratch
 outputs/
 work/
+dist/
+*.dmg
+*.dmg.sha256
+*.zip
+*.zip.sha256
+checksums.txt

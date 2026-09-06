@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Backside", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Grant Accessibility Access…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+        menu.addItem(withTitle: "Open Note Library", action: #selector(openLibrary), keyEquivalent: "l")
         menu.addItem(withTitle: "Hide All Scratchpads", action: #selector(hideAll), keyEquivalent: "h")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Backside", action: #selector(quit), keyEquivalent: "q")
@@ -50,5 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func hideAll() { coordinator.hideAll() }
+    @objc private func openLibrary() { coordinator.showLibrary() }
     @objc private func quit() { NSApp.terminate(nil) }
 }

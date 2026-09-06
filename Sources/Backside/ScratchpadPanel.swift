@@ -14,6 +14,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
     init(target: TargetWindow, noteStore: NoteStore) {
         self.target = target
         self.noteStore = noteStore
+        noteStore.register(target)
         let initialFrame = Self.appKitFrame(for: target.frame() ?? .zero)
         super.init(
             contentRect: initialFrame,
@@ -123,9 +124,12 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
     func hide(animated: Bool) {
         guard visibleAsBackside else { return }
         visibleAsBackside = false
-        noteStore.save(editor.string, for: target.key)
+        noteStore.save(editor.string, for: target)
         let finish: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor in self?.orderOut(nil) }
+            Task { @MainActor in
+                self?.orderOut(nil)
+                self?.restoreTargetApplication()
+            }
         }
         guard animated else { finish(); return }
         animateFlip(from: CATransform3DIdentity, to: flipTransform(angle: -.pi / 2.25), duration: 0.18)
@@ -141,7 +145,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         if !frame.equalTo(self.frame) { setFrame(frame, display: visibleAsBackside, animate: false) }
     }
 
-    func textDidChange(_ notification: Notification) { noteStore.save(editor.string, for: target.key) }
+    func textDidChange(_ notification: Notification) { noteStore.save(editor.string, for: target) }
 
     override func cancelOperation(_ sender: Any?) { hide(animated: true) }
 
@@ -198,5 +202,9 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         CATransaction.setDisableActions(true)
         layer.transform = transform
         CATransaction.commit()
+    }
+
+    private func restoreTargetApplication() {
+        NSRunningApplication(processIdentifier: target.pid)?.activate(options: [])
     }
 }
