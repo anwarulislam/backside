@@ -71,3 +71,28 @@ To build and launch the standalone application bundle (`Backside.app`):
 # Launch the built app
 open dist/Backside.app
 ```
+
+---
+
+## First Launch & macOS Gatekeeper ("Open Anyway")
+
+Because Backside is ad-hoc signed and not notarized through a paid Apple Developer certificate, macOS Gatekeeper may warn that the app cannot be opened or is from an unidentified developer.
+
+To open it:
+
+- **Option A (System Settings)**:
+  1. Try opening `Backside.app`.
+  2. If blocked, open **System Settings → Privacy & Security**.
+  3. Scroll down to the **Security** section where you will see a message: *“Backside was blocked from use because it is not from an identified developer”*.
+  4. Click **Open Anyway** and enter your Mac password or Touch ID.
+
+- **Option B (Right-Click Open)**:
+  1. In Finder or `/Applications`, **Right-Click** (or **Control-click**) `Backside.app`.
+  2. Select **Open** from the context menu.
+  3. Click **Open** in the dialog.
+
+- **Option C (Terminal - Remove Quarantine Attribute)**:
+  If you downloaded the release or moved it to `/Applications`, remove the quarantine flag via terminal:
+  ```sh
+  xattr -cr /Applications/Backside.app
+  ```

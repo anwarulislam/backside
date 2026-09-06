@@ -133,8 +133,11 @@ jobs:
           ### Installation
           1. Download **`Backside-${{ steps.version.outputs.version }}.dmg`** (or `.zip`).
           2. Open the DMG and drag **Backside.app** to your **/Applications** folder.
-          3. Launch Backside and allow Accessibility permissions in **System Settings → Privacy & Security → Accessibility**.
-          4. Hold **Option** and click any window's title bar to toggle its attached scratchpad note.
+          3. If macOS Gatekeeper blocks opening on first launch (since this is an open-source build without a paid developer certificate):
+             - Open **System Settings → Privacy & Security**, scroll to **Security**, and click **Open Anyway**.
+             - *Or* run in Terminal: `xattr -cr /Applications/Backside.app`
+          4. Allow Accessibility permissions in **System Settings → Privacy & Security → Accessibility**.
+          5. Hold **Option** and click any window's title bar to toggle its attached scratchpad note.
 
           ### SHA-256 Checksums
           ```
