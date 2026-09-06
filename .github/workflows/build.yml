@@ -1,0 +1,42 @@
+name: Build and Verify
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build & Verify macOS App
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Swift & Xcode environment
+        run: |
+          swift --version
+          xcodebuild -version || true
+
+      - name: Build Universal App & Package DMG/ZIP
+        run: |
+          ./scripts/package.sh --arch universal
+
+      - name: Verify Code Signature
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/Backside.app
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Backside-macOS-Universal-Build
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.sha256
+            dist/checksums.txt
+          retention-days: 14

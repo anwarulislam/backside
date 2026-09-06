@@ -2,9 +2,11 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# Backside macOS Packaging Script
-# Builds universal binary, creates Backside.app, packages .zip & .dmg, and
-# generates SHA-256 checksums.
+# Backside macOS Packaging & Release Script
+#
+# Builds universal Mach-O binary (arm64 + x86_64), constructs Backside.app
+# bundle, signs (ad-hoc or Developer ID), optionally notarizes & staples,
+# packages .zip and .dmg, and generates SHA-256 checksums.
 # -----------------------------------------------------------------------------
 
 VERSION="${VERSION:-}"
@@ -14,6 +16,12 @@ OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 ARCH="${ARCH:-universal}"
 CREATE_DMG=true
 CREATE_ZIP=true
+NOTARIZE=false
+
+# Apple Notarization credentials (optional)
+APPLE_ID="${APPLE_ID:-}"
+APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
+APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD:-}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -38,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ARCH="$2"
       shift 2
       ;;
+    --notarize)
+      NOTARIZE=true
+      shift
+      ;;
     --no-dmg)
       CREATE_DMG=false
       shift
@@ -48,7 +60,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--version <ver>] [--build-number <num>] [--identity <id>] [--output-dir <dir>] [--arch <universal|arm64|x86_64|host>] [--no-dmg] [--no-zip]"
+      echo "Usage: $0 [--version <ver>] [--build-number <num>] [--identity <id>] [--output-dir <dir>] [--arch <universal|arm64|x86_64|host>] [--notarize] [--no-dmg] [--no-zip]"
       exit 1
       ;;
   esac
@@ -58,7 +70,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
-# Auto-detect version if not supplied
+# Determine version
 if [ -z "$VERSION" ]; then
   if git describe --tags --exact-match 2>/dev/null; then
     VERSION="$(git describe --tags --exact-match | sed 's/^v//')"
@@ -69,7 +81,7 @@ if [ -z "$VERSION" ]; then
   fi
 fi
 
-# Auto-detect build number if not supplied
+# Determine build number
 if [ -z "$BUILD_NUMBER" ]; then
   if git rev-list --count HEAD 2>/dev/null; then
     BUILD_NUMBER="$(git rev-list --count HEAD)"
@@ -80,15 +92,16 @@ fi
 
 echo "=========================================="
 echo " Packaging Backside macOS App"
-echo " Version:       $VERSION"
-echo " Build Number:  $BUILD_NUMBER"
-echo " Architecture:  $ARCH"
-echo " Sign Identity: $SIGN_IDENTITY"
-echo " Output Dir:    $OUTPUT_DIR"
+echo " Version:        $VERSION"
+echo " Build Number:   $BUILD_NUMBER"
+echo " Architecture:   $ARCH"
+echo " Sign Identity:  $SIGN_IDENTITY"
+echo " Notarize:       $NOTARIZE"
+echo " Output Dir:     $OUTPUT_DIR"
 echo "=========================================="
 
 # Build Swift executable
-echo "==> Building Backside executable with Swift..."
+echo "==> Building Backside executable with Swift ($ARCH)..."
 if [ "$ARCH" = "universal" ]; then
   swift build -c release --arch arm64 --arch x86_64
   BIN_PATH=".build/apple/Products/Release/Backside"
@@ -183,7 +196,7 @@ if [ "$SIGN_IDENTITY" = "-" ]; then
   codesign --force --deep --sign - "$APP_BUNDLE"
 else
   echo "Applying signature with identity: $SIGN_IDENTITY..."
-  codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 fi
 
 echo "==> Verifying signature..."
@@ -210,6 +223,34 @@ if [ "$CREATE_DMG" = true ]; then
   rm -f "$OUTPUT_DIR/$DMG_NAME"
   hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" -ov -format UDZO "$OUTPUT_DIR/$DMG_NAME"
   rm -rf "$DMG_STAGE"
+
+  # Sign DMG if using real identity
+  if [ "$SIGN_IDENTITY" != "-" ]; then
+    echo "==> Signing DMG..."
+    codesign --force --sign "$SIGN_IDENTITY" --timestamp "$OUTPUT_DIR/$DMG_NAME"
+  fi
+fi
+
+# Notarization (Apple Developer Account)
+if [ "$NOTARIZE" = true ]; then
+  if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+    echo "==> Submitting for notarization..."
+    TARGET_FILE="$OUTPUT_DIR/${APP_NAME}-${VERSION}.dmg"
+    [ ! -f "$TARGET_FILE" ] && TARGET_FILE="$OUTPUT_DIR/${APP_NAME}-${VERSION}.zip"
+    
+    xcrun notarytool submit "$TARGET_FILE" \
+      --apple-id "$APPLE_ID" \
+      --team-id "$APPLE_TEAM_ID" \
+      --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+      --wait
+
+    if [ "$CREATE_DMG" = true ] && [ -f "$OUTPUT_DIR/${APP_NAME}-${VERSION}.dmg" ]; then
+      echo "==> Stapling notarization ticket to DMG..."
+      xcrun stapler staple "$OUTPUT_DIR/${APP_NAME}-${VERSION}.dmg"
+    fi
+  else
+    echo "Warning: Notarization requested but APPLE_ID, APPLE_TEAM_ID, or APPLE_APP_SPECIFIC_PASSWORD missing. Skipping."
+  fi
 fi
 
 # Generate Checksums

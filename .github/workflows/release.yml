@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. 1.0.0 or v1.0.0)'
+        required: false
+        default: ''
+      draft:
+        description: 'Create draft release'
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Create prerelease'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release macOS App
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            RAW_VER="${{ inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            RAW_VER="${GITHUB_REF#refs/tags/}"
+          else
+            RAW_VER="$(git describe --tags --abbrev=0 2>/dev/null || echo '1.0.0')"
+          fi
+
+          CLEAN_VER="${RAW_VER#v}"
+          TAG_NAME="v${CLEAN_VER}"
+
+          echo "version=${CLEAN_VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Target Version: ${CLEAN_VER} (Tag: ${TAG_NAME})"
+
+      - name: Check Swift & Xcode version
+        run: |
+          swift --version
+          xcodebuild -version || true
+
+      - name: Setup Apple Developer Certificate (Optional)
+        id: certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD || 'temporary-ci-keychain-pass' }}
+        run: |
+          if [ -n "$BUILD_CERTIFICATE_BASE64" ]; then
+            echo "Importing Apple Developer Certificate..."
+            CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+            KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+
+            echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+
+            security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+            security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+            security list-keychain -d user -s "$KEYCHAIN_PATH"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No APPLE_CERTIFICATE secret detected. Proceeding with ad-hoc signing."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Universal App & Package DMG/ZIP
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          IDENTITY="-"
+          NOTARIZE_FLAG=""
+
+          if [ "${{ steps.certificate.outputs.signed }}" = "true" ] && [ -n "$DEVELOPER_ID_APPLICATION" ]; then
+            echo "Configuring Developer ID Application signature: $DEVELOPER_ID_APPLICATION"
+            IDENTITY="$DEVELOPER_ID_APPLICATION"
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
+              NOTARIZE_FLAG="--notarize"
+            fi
+          fi
+
+          ./scripts/package.sh \
+            --version "${{ steps.version.outputs.version }}" \
+            --arch universal \
+            --identity "$IDENTITY" \
+            $NOTARIZE_FLAG
+
+      - name: Cleanup temporary signing keychain
+        if: always() && steps.certificate.outputs.signed == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+      - name: Prepare Release Notes
+        id: release_notes
+        run: |
+          cat << 'EOF' > release_body.md
+          ## Backside macOS Application
+
+          Backside is a lightweight, native macOS scratchpad that attaches to another application's window.
+
+          ### Installation
+          1. Download **`Backside-${{ steps.version.outputs.version }}.dmg`** (or `.zip`).
+          2. Open the DMG and drag **Backside.app** to your **/Applications** folder.
+          3. Launch Backside and allow Accessibility permissions in **System Settings → Privacy & Security → Accessibility**.
+          4. Hold **Option** and click any window's title bar to toggle its attached scratchpad note.
+
+          ### SHA-256 Checksums
+          ```
+          EOF
+          cat dist/checksums.txt >> release_body.md
+          echo '```' >> release_body.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Backside ${{ steps.version.outputs.tag }}
+          body_path: release_body.md
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
+          generate_release_notes: true
+          files: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/checksums.txt
