@@ -1,74 +1,73 @@
 # Backside
 
-Backside is a lightweight, native macOS scratchpad that is attached to another app's window.
+Backside is a lightweight, native macOS scratchpad that attaches directly to another app's window. It gives you an instant, contextual notepad for any window on your Mac without cluttering your desktop or breaking your workflow.
 
-## Run
+---
+
+## What's in Backside
+
+- **Contextual Window Scratchpads**: Every window gets its own dedicated scratchpad.
+- **Window Following**: Scratchpad panels track the target window's frame in real-time, working seamlessly across displays and macOS Spaces.
+- **Native Option-Click Gesture**: Hold **Option** and click any window's title bar to reveal or hide its scratchpad. The click still passes through natively to the target application.
+- **Smooth Flip Animation**: Panels animate with a 3D flip effect and dismiss cleanly when you press **Escape** or repeat the gesture.
+- **Local SQLite Persistence**: Notes and window metadata (app name, bundle ID, window title, timestamps) are stored locally in SQLite at `~/Library/Application Support/Backside/notes.sqlite`.
+- **Note Library**: A multi-column window to browse notes by app, search across all notes, pin important scratchpads, and edit content directly.
+- **Menu Bar Accessory**: Runs unobtrusively in the menu bar with no Dock clutter.
+
+---
+
+## How to Use
+
+### 1. Toggle a Scratchpad
+- Hold **Option** and click any app's title bar (or unified toolbar area).
+- Backside attaches to that window and reveals its scratchpad.
+- Start typing immediately. Your notes are saved automatically as you type.
+- Press **Escape** or **Option-click** the title bar again to dismiss.
+
+### 2. Note Library
+- Click the Backside icon in the menu bar.
+- Select **Open Note Library** (or press **⌘L**).
+- Filter notes by application, search through note contents, pin critical notes to the top, and edit notes in place.
+
+### 3. Menu Bar Controls
+- **Open Note Library**: View and search all captured notes.
+- **Hide All Scratchpads**: Instantly dismiss all open panels.
+- **Grant Accessibility Access…**: Quick shortcut to macOS privacy settings.
+- **Quit Backside**: Terminate the application.
+
+---
+
+## Accessibility Permission
+
+Backside requires macOS Accessibility access to detect window frames and monitor title bar clicks.
+
+When launching Backside for the first time:
+1. macOS will prompt you to grant Accessibility access.
+2. If prompted, open **System Settings → Privacy & Security → Accessibility**.
+3. Toggle the switch next to **Backside** (or your terminal application if running via command line).
+
+---
+
+## Running Locally
+
+### Requirements
+- macOS 14.0 (Sonoma) or newer
+- Xcode 15.4+ or Swift 5.10+
+
+### Quick Run
+Run the app directly using the Swift Package Manager:
 
 ```sh
 swift run Backside
 ```
 
-Grant Accessibility access when macOS asks (or enable the terminal / built app in **System Settings → Privacy & Security → Accessibility**). Backside stays in the menu bar.
-
-## MVP interaction
-
-1. Hold **Option** and click another app's title bar.
-2. Backside finds that Accessibility window and reveals its attached scratchpad.
-3. Repeat the gesture, or press **Escape**, to hide it.
-
-Notes and their window/app metadata are saved locally in SQLite at `~/Library/Application Support/Backside/notes.sqlite`. Use **Open Note Library** from the menu bar to browse notes by app, search their contents, pin important notes, and edit them in a dedicated window. The panel follows its target's frame, works across displays and Spaces, and is removed when the target closes.
-
-The Option-click is intentionally passed through to the original app; the title-bar click retains normal native behavior.
-
-## Packaging Locally
-
-You can package the native macOS application bundle (`Backside.app`), DMG disk image, and ZIP archive locally using the packaging script:
+### Build as a Native macOS Application
+To build and launch the standalone application bundle (`Backside.app`):
 
 ```sh
-# Build universal binary (arm64 + x86_64) and create Backside.app, DMG, and ZIP
-./scripts/package.sh --version 1.0.0
+# Package Backside.app, DMG, and ZIP in dist/
+./scripts/package.sh
 
-# Or build only for the host architecture
-./scripts/package.sh --version 1.0.0 --arch host
+# Launch the built app
+open dist/Backside.app
 ```
-
-Artifacts are placed in `dist/`:
-- `Backside.app`: macOS application bundle with embedded `Info.plist` and `AppIcon.icns`
-- `Backside-1.0.0.dmg`: Installable disk image with `/Applications` shortcut
-- `Backside-1.0.0.zip`: Standalone zip archive
-- `Backside-1.0.0.dmg.sha256`, `Backside-1.0.0.zip.sha256`, and `checksums.txt`
-
-## GitHub Actions & Automated Releases
-
-Two workflows are configured in [`.github/workflows/`](.github/workflows/):
-
-### 1. Build and Verify (`build.yml`)
-- **Triggers**: On pull requests or pushes to the `main` branch.
-- **Action**:
-  - Compiles Backside on `macos-14` (Apple Silicon runner).
-  - Builds the universal binary (`arm64` and `x86_64`).
-  - Packages `Backside.app`, `.dmg`, and `.zip`.
-  - Verifies code signature integrity.
-  - Uploads build artifacts to GitHub Actions for easy testing and review.
-
-### 2. Release (`release.yml`)
-- **Triggers**:
-  - Automatically on tag push: `git tag v1.0.0 && git push origin v1.0.0`
-  - Manually via **Actions → Release → Run workflow** (with optional version input, draft, and prerelease toggles).
-- **Action**:
-  - Builds the universal app bundle and packages `.dmg` and `.zip`.
-  - Generates SHA-256 checksums (`checksums.txt`).
-  - Publishes a new GitHub Release with attached `.dmg`, `.zip`, and checksum assets.
-  - Generates release notes automatically from commit logs.
-
-#### Code Signing & Notarization (Optional)
-The release workflow runs out-of-the-box with **ad-hoc code signing** without needing any secret configuration. If you have an Apple Developer account and wish to sign and notarize releases:
-
-Configure the following GitHub Repository Secrets:
-- `APPLE_CERTIFICATE`: Base64-encoded Developer ID Application `.p12` export (`base64 -i cert.p12`)
-- `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12` certificate file
-- `DEVELOPER_ID_APPLICATION`: Signing identity, e.g. `Developer ID Application: Your Name (TEAM_ID)`
-- `APPLE_ID`: Your Apple ID email
-- `APPLE_TEAM_ID`: Your 10-character Apple Developer Team ID
-- `APPLE_APP_SPECIFIC_PASSWORD`: An app-specific password generated from [appleid.apple.com](https://appleid.apple.com)
-
