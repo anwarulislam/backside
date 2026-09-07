@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import ApplicationServices
 
 @MainActor
 final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
@@ -10,7 +11,6 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
     private let cardMargin: CGFloat = 24
 
     private let containerView = FlipHostContainerView()
-    private let underlayView = NSImageView()
     private let flipHostView = NSView()
     private let frontCard = FrontWindowCardView()
     private let backCard = BacksideCardView()
@@ -18,6 +18,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
     private var visibleAsBackside = false
     private var isAnimating = false
     private(set) var isInvalid = false
+    private var hideMethod: TargetWindowHidingService.HideMethod = .none
 
     init(target: TargetWindow, noteStore: NoteStore) {
         self.target = target
@@ -29,7 +30,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
 
         super.init(
             contentRect: panelFrame,
-            styleMask: [.borderless],
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
@@ -47,6 +48,10 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         setupViews()
     }
 
+    deinit {
+        TargetWindowHidingService.restore(method: hideMethod, pid: target.pid)
+    }
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
@@ -58,24 +63,11 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         containerView.cardView = flipHostView
         self.contentView = containerView
 
-        underlayView.wantsLayer = true
-        underlayView.layer?.cornerRadius = 12
-        underlayView.layer?.masksToBounds = true
-        underlayView.imageScaling = .scaleAxesIndependently
-        underlayView.translatesAutoresizingMaskIntoConstraints = false
-        underlayView.isHidden = true
-        containerView.addSubview(underlayView)
-
         flipHostView.wantsLayer = true
         flipHostView.translatesAutoresizingMaskIntoConstraints = false
         containerView.addSubview(flipHostView)
 
         NSLayoutConstraint.activate([
-            underlayView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: cardMargin),
-            underlayView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -cardMargin),
-            underlayView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: cardMargin),
-            underlayView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -cardMargin),
-
             flipHostView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: cardMargin),
             flipHostView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -cardMargin),
             flipHostView.topAnchor.constraint(equalTo: containerView.topAnchor, constant: cardMargin),
@@ -120,16 +112,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         let targetRect = Self.appKitFrame(for: axFrame)
         setFrame(targetRect.insetBy(dx: -cardMargin, dy: -cardMargin), display: true)
 
-        // Capture background beneath the target window to cover the stationary window during the flip
-        let belowImage = WindowSnapshotService.captureBelow(windowNumber: target.windowNumber, screenRect: axFrame)
-        if let below = belowImage {
-            underlayView.image = below
-            underlayView.isHidden = false
-        } else {
-            underlayView.isHidden = true
-        }
-
-        // Capture the live target window itself
+        // Capture live target window snapshot BEFORE moving the window offscreen
         let snapshot = WindowSnapshotService.capture(windowNumber: target.windowNumber, screenRect: axFrame)
         frontCard.update(target: target, snapshot: snapshot)
         backCard.update(target: target)
@@ -147,8 +130,11 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         frontCard.isHidden = false
         backCard.isHidden = false
 
+        // Intelligently hide the target window without switching frontmost app
+        hideMethod = TargetWindowHidingService.hideWindow(for: target)
+
         makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        makeFirstResponder(backCard.editor)
 
         let duration: CFTimeInterval = 0.40
         let timing = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1.0)
@@ -163,7 +149,6 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         CATransaction.setCompletionBlock { [weak self] in
             guard let self = self else { return }
             self.frontCard.isHidden = true
-            self.underlayView.isHidden = true
             self.frontCard.layer?.removeAllAnimations()
             self.backCard.layer?.removeAllAnimations()
             self.frontCard.layer?.transform = CATransform3DIdentity
@@ -240,8 +225,8 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
 
         let finish: @Sendable () -> Void = { [weak self] in
             Task { @MainActor in
+                self?.restoreTargetWindow()
                 self?.orderOut(nil)
-                self?.restoreTargetApplication()
                 self?.isAnimating = false
             }
         }
@@ -251,17 +236,9 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
             return
         }
 
-        guard let axFrame = target.frame() else { finish(); return }
-
         isAnimating = true
         containerView.layoutSubtreeIfNeeded()
         prepareLayersForAnimation()
-
-        // Re-enable underlay to hide stationary window during reverse flip
-        if let below = WindowSnapshotService.captureBelow(windowNumber: target.windowNumber, screenRect: axFrame) {
-            underlayView.image = below
-            underlayView.isHidden = false
-        }
 
         frontCard.isHidden = false
         backCard.isHidden = false
@@ -278,7 +255,6 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         CATransaction.setAnimationDuration(duration)
         CATransaction.setAnimationTimingFunction(timing)
         CATransaction.setCompletionBlock { [weak self] in
-            self?.underlayView.isHidden = true
             self?.frontCard.layer?.removeAllAnimations()
             self?.backCard.layer?.removeAllAnimations()
             self?.frontCard.layer?.transform = CATransform3DIdentity
@@ -340,6 +316,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
 
     func trackTarget() {
         guard !isAnimating else { return }
+        guard hideMethod == .none else { return }
         guard let axFrame = target.frame() else { invalidate(); return }
         let targetRect = Self.appKitFrame(for: axFrame)
         let panelFrame = targetRect.insetBy(dx: -cardMargin, dy: -cardMargin)
@@ -377,6 +354,13 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         }
     }
 
+    private func restoreTargetWindow() {
+        guard hideMethod != .none else { return }
+        let method = hideMethod
+        hideMethod = .none
+        TargetWindowHidingService.restore(method: method, pid: target.pid)
+    }
+
     private func prepareLayersForAnimation() {
         let bounds = flipHostView.bounds
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -408,6 +392,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
 
     private func invalidate() {
         isInvalid = true
+        restoreTargetWindow()
         orderOut(nil)
         onDismiss?(target.key)
     }
@@ -415,10 +400,6 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
     private static func appKitFrame(for axFrame: CGRect) -> NSRect {
         let union = NSScreen.screens.reduce(CGRect.null) { $0.union($1.frame) }
         return NSRect(x: axFrame.minX, y: union.maxY - axFrame.maxY, width: axFrame.width, height: axFrame.height)
-    }
-
-    private func restoreTargetApplication() {
-        NSRunningApplication(processIdentifier: target.pid)?.activate()
     }
 }
 

@@ -49,7 +49,8 @@ struct TargetWindow: Hashable {
               isTitleBarHit(initial, window: window, point: screenPoint) else { return nil }
 
         let title = string(window, kAXTitleAttribute) ?? "Untitled window"
-        let wid = windowID(for: window)
+        let targetFrame = TargetWindow(element: window, pid: 0, key: "", title: "", appBundleID: "", appName: "").frame()
+        let wid = windowID(for: window, pid: pid, frame: targetFrame)
         let number = wid != 0 ? Int(wid) : (numberAttribute(window, "AXWindowNumber") ?? 0)
         let app = NSRunningApplication(processIdentifier: pid)
         let appBundleID = app?.bundleIdentifier ?? "pid.\(pid)"
@@ -116,10 +117,24 @@ struct TargetWindow: Hashable {
         return unsafeBitCast(sym, to: AXUIElementGetWindowFunc.self)
     }()
 
-    static func windowID(for element: AXUIElement) -> CGWindowID {
+    static func windowID(for element: AXUIElement, pid: pid_t = 0, frame: CGRect? = nil) -> CGWindowID {
         var wid: CGWindowID = 0
         if let fn = getWindowIDFunc, fn(element, &wid) == .success, wid != 0 {
             return wid
+        }
+        if pid != 0 {
+            let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+            for w in list where (w[kCGWindowOwnerPID as String] as? pid_t) == pid {
+                if let f = frame,
+                   let boundsDict = w[kCGWindowBounds as String] as? [String: Any],
+                   let x = (boundsDict["X"] as? NSNumber)?.doubleValue,
+                   let y = (boundsDict["Y"] as? NSNumber)?.doubleValue,
+                   abs(x - Double(f.origin.x)) < 8,
+                   abs(y - Double(f.origin.y)) < 8,
+                   let num = (w[kCGWindowNumber as String] as? NSNumber)?.uint32Value {
+                    return CGWindowID(num)
+                }
+            }
         }
         return 0
     }

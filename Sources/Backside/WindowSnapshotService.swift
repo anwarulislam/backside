@@ -25,25 +25,4 @@ enum WindowSnapshotService {
         }
         return nil
     }
-
-    /// Captures the screen area beneath the target window (desktop wallpaper and lower windows).
-    static func captureBelow(windowNumber: CGWindowID, screenRect: CGRect) -> NSImage? {
-        guard let fn = legacyCaptureFunc else { return nil }
-
-        let options: UInt32 = 1 | 8
-        // 1. Try capturing below the specific window
-        if windowNumber != 0,
-           let cgImage = fn(screenRect, 4, windowNumber, options)?.takeRetainedValue(),
-           cgImage.width > 0, cgImage.height > 0 {
-            return NSImage(cgImage: cgImage, size: screenRect.size)
-        }
-
-        // 2. Fallback: capture on-screen background elements at this coordinate
-        if let cgImage = fn(screenRect, 1, 0, options)?.takeRetainedValue(),
-           cgImage.width > 0, cgImage.height > 0 {
-            return NSImage(cgImage: cgImage, size: screenRect.size)
-        }
-
-        return nil
-    }
 }
