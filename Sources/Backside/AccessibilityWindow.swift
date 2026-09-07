@@ -8,6 +8,35 @@ struct TargetWindow: Hashable {
     let title: String
     let appBundleID: String
     let appName: String
+    let windowNumber: CGWindowID
+
+    init(
+        element: AXUIElement,
+        pid: pid_t,
+        key: String,
+        title: String,
+        appBundleID: String,
+        appName: String,
+        windowNumber: CGWindowID = 0
+    ) {
+        self.element = element
+        self.pid = pid
+        self.key = key
+        self.title = title
+        self.appBundleID = appBundleID
+        self.appName = appName
+        self.windowNumber = windowNumber
+    }
+
+    var appIcon: NSImage? {
+        if let app = NSRunningApplication(processIdentifier: pid), let icon = app.icon {
+            return icon
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: appBundleID) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return nil
+    }
 
     static func at(screenPoint: CGPoint) -> TargetWindow? {
         var hit: AXUIElement?
@@ -20,13 +49,22 @@ struct TargetWindow: Hashable {
               isTitleBarHit(initial, window: window, point: screenPoint) else { return nil }
 
         let title = string(window, kAXTitleAttribute) ?? "Untitled window"
-        let number = numberAttribute(window, "AXWindowNumber") ?? 0
+        let wid = windowID(for: window)
+        let number = wid != 0 ? Int(wid) : (numberAttribute(window, "AXWindowNumber") ?? 0)
         let app = NSRunningApplication(processIdentifier: pid)
         let appBundleID = app?.bundleIdentifier ?? "pid.\(pid)"
         let appName = app?.localizedName ?? appBundleID
         // Window number distinguishes otherwise identically titled document windows for a session.
         let key = "\(appBundleID)|\(number)|\(title)"
-        return TargetWindow(element: window, pid: pid, key: key, title: title, appBundleID: appBundleID, appName: appName)
+        return TargetWindow(
+            element: window,
+            pid: pid,
+            key: key,
+            title: title,
+            appBundleID: appBundleID,
+            appName: appName,
+            windowNumber: CGWindowID(number)
+        )
     }
 
     func frame() -> CGRect? {
@@ -69,6 +107,21 @@ struct TargetWindow: Hashable {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
         return value as? Int
+    }
+
+    private typealias AXUIElementGetWindowFunc = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+
+    private static let getWindowIDFunc: AXUIElementGetWindowFunc? = {
+        guard let sym = dlsym(dlopen(nil, RTLD_NOW), "_AXUIElementGetWindow") else { return nil }
+        return unsafeBitCast(sym, to: AXUIElementGetWindowFunc.self)
+    }()
+
+    static func windowID(for element: AXUIElement) -> CGWindowID {
+        var wid: CGWindowID = 0
+        if let fn = getWindowIDFunc, fn(element, &wid) == .success, wid != 0 {
+            return wid
+        }
+        return 0
     }
 
     private static func isTitleBarHit(_ initial: AXUIElement, window: AXUIElement, point: CGPoint) -> Bool {

@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenuBar()
         requestAccessibilityIfNeeded()
+        requestScreenCaptureIfNeeded()
         clickMonitor.start()
     }
 
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Backside", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Grant Accessibility Access…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+        menu.addItem(withTitle: "Grant Screen Recording Access…", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
         menu.addItem(withTitle: "Open Note Library", action: #selector(openLibrary), keyEquivalent: "l")
         menu.addItem(withTitle: "Hide All Scratchpads", action: #selector(hideAll), keyEquivalent: "h")
         menu.addItem(.separator())
@@ -45,8 +47,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    private func requestScreenCaptureIfNeeded() {
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+        }
+    }
+
     @objc private func openAccessibilitySettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func openScreenRecordingSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
         NSWorkspace.shared.open(url)
     }
 
