@@ -103,6 +103,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
 
         frontCard.update(target: target, snapshot: nil)
         frontCard.isHidden = true
+        backCard.isHidden = true
     }
 
     func reveal() {
@@ -127,39 +128,58 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         visibleAsBackside = true
         alphaValue = 1.0
 
+        // Set initial card states without implicit animation: front is at 0, back is pre-rotated to -pi
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frontCard.layer?.transform = CATransform3DIdentity
+        backCard.layer?.transform = CATransform3DMakeRotation(-.pi, 0, 1, 0)
+        frontCard.layer?.opacity = 1.0
+        backCard.layer?.opacity = 1.0
+        frontCard.setDimmerOpacity(0.0)
+        backCard.setDimmerOpacity(0.30)
         frontCard.isHidden = false
         backCard.isHidden = false
+        CATransaction.commit()
 
-        // Intelligently hide the target window without switching frontmost app
-        hideMethod = TargetWindowHidingService.hideWindow(for: target)
-
+        // Order the panel front with frontCard matching the target window
         makeKeyAndOrderFront(nil)
         makeFirstResponder(backCard.editor)
 
-        let duration: CFTimeInterval = 0.40
-        let timing = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1.0)
-        let depth = min(180, max(90, flipHostView.bounds.width * 0.18))
+        // Intelligently hide target window without switching frontmost app
+        hideMethod = TargetWindowHidingService.hideWindow(for: target)
 
-        let frontTransforms = Self.makeFlipKeyframes(fromAngle: 0, toAngle: .pi, maxDepth: depth)
-        let backTransforms = Self.makeFlipKeyframes(fromAngle: -.pi, toAngle: 0, maxDepth: depth)
+        let duration: CFTimeInterval = 0.38
+        let timing = CAMediaTimingFunction(controlPoints: 0.2, 0.0, 0.2, 1.0)
+        let depth = min(160, max(80, flipHostView.bounds.width * 0.16))
+
+        let frontTransforms = Self.makeFlipKeyframes(fromAngle: 0, toAngle: .pi, maxDepth: depth, steps: 64)
+        let backTransforms = Self.makeFlipKeyframes(fromAngle: -.pi, toAngle: 0, maxDepth: depth, steps: 64)
 
         CATransaction.begin()
         CATransaction.setAnimationDuration(duration)
         CATransaction.setAnimationTimingFunction(timing)
         CATransaction.setCompletionBlock { [weak self] in
             guard let self = self else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             self.frontCard.isHidden = true
             self.frontCard.layer?.removeAllAnimations()
             self.backCard.layer?.removeAllAnimations()
-            self.frontCard.layer?.transform = CATransform3DIdentity
+            self.frontCard.dimmerLayer.removeAllAnimations()
+            self.backCard.dimmerLayer.removeAllAnimations()
+            self.frontCard.layer?.transform = CATransform3DMakeRotation(.pi, 0, 1, 0)
             self.backCard.layer?.transform = CATransform3DIdentity
+            self.frontCard.layer?.opacity = 1.0
+            self.backCard.layer?.opacity = 1.0
             self.backCard.setDimmerOpacity(0.0)
             self.frontCard.setDimmerOpacity(0.0)
+            CATransaction.commit()
+
             self.makeFirstResponder(self.backCard.editor)
             self.isAnimating = false
         }
 
-        // Animate front card turning away
+        // Animate front card turning away (0 -> pi)
         let frontAnim = CAKeyframeAnimation(keyPath: "transform")
         frontAnim.values = frontTransforms.map { NSValue(caTransform3D: $0) }
         frontAnim.duration = duration
@@ -169,21 +189,22 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         frontCard.layer?.add(frontAnim, forKey: "flip.transform")
 
         let frontOpacity = CAKeyframeAnimation(keyPath: "opacity")
-        frontOpacity.keyTimes = [0.0, 0.48, 0.52, 1.0]
+        frontOpacity.keyTimes = [0.0, 0.499, 0.501, 1.0]
         frontOpacity.values = [1.0, 1.0, 0.0, 0.0]
         frontOpacity.duration = duration
         frontOpacity.isRemovedOnCompletion = false
         frontOpacity.fillMode = .forwards
         frontCard.layer?.add(frontOpacity, forKey: "flip.opacity")
 
-        let frontDim = CABasicAnimation(keyPath: "opacity")
-        frontDim.fromValue = 0.0
-        frontDim.toValue = 0.35
-        frontDim.duration = duration * 0.5
-        frontDim.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        let frontDim = CAKeyframeAnimation(keyPath: "opacity")
+        frontDim.keyTimes = [0.0, 0.5, 1.0]
+        frontDim.values = [0.0, 0.30, 0.30]
+        frontDim.duration = duration
+        frontDim.isRemovedOnCompletion = false
+        frontDim.fillMode = .forwards
         frontCard.dimmerLayer.add(frontDim, forKey: "flip.dim")
 
-        // Animate back card turning in
+        // Animate back card turning in (-pi -> 0)
         let backAnim = CAKeyframeAnimation(keyPath: "transform")
         backAnim.values = backTransforms.map { NSValue(caTransform3D: $0) }
         backAnim.duration = duration
@@ -193,19 +214,19 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         backCard.layer?.add(backAnim, forKey: "flip.transform")
 
         let backOpacity = CAKeyframeAnimation(keyPath: "opacity")
-        backOpacity.keyTimes = [0.0, 0.48, 0.52, 1.0]
+        backOpacity.keyTimes = [0.0, 0.499, 0.501, 1.0]
         backOpacity.values = [0.0, 0.0, 1.0, 1.0]
         backOpacity.duration = duration
         backOpacity.isRemovedOnCompletion = false
         backOpacity.fillMode = .forwards
         backCard.layer?.add(backOpacity, forKey: "flip.opacity")
 
-        let backDim = CABasicAnimation(keyPath: "opacity")
-        backDim.fromValue = 0.35
-        backDim.toValue = 0.0
-        backDim.beginTime = CACurrentMediaTime() + duration * 0.5
-        backDim.duration = duration * 0.5
-        backDim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        let backDim = CAKeyframeAnimation(keyPath: "opacity")
+        backDim.keyTimes = [0.0, 0.5, 1.0]
+        backDim.values = [0.30, 0.30, 0.0]
+        backDim.duration = duration
+        backDim.isRemovedOnCompletion = false
+        backDim.fillMode = .forwards
         backCard.dimmerLayer.add(backDim, forKey: "flip.dim")
 
         CATransaction.commit()
@@ -223,16 +244,15 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         visibleAsBackside = false
         noteStore.save(backCard.editor.string, for: target)
 
-        let finish: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor in
-                self?.restoreTargetWindow()
-                self?.orderOut(nil)
-                self?.isAnimating = false
-            }
-        }
-
         guard animated else {
-            finish()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            backCard.isHidden = true
+            frontCard.isHidden = true
+            CATransaction.commit()
+            restoreTargetWindow()
+            orderOut(nil)
+            isAnimating = false
             return
         }
 
@@ -240,26 +260,51 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         containerView.layoutSubtreeIfNeeded()
         prepareLayersForAnimation()
 
+        // Set initial card states for reverse flip: backCard is at 0, frontCard is at +pi
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        backCard.layer?.transform = CATransform3DIdentity
+        frontCard.layer?.transform = CATransform3DMakeRotation(.pi, 0, 1, 0)
+        backCard.layer?.opacity = 1.0
+        frontCard.layer?.opacity = 1.0
+        backCard.setDimmerOpacity(0.0)
+        frontCard.setDimmerOpacity(0.30)
         frontCard.isHidden = false
         backCard.isHidden = false
+        CATransaction.commit()
 
         let duration: CFTimeInterval = 0.35
-        let timing = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1.0)
-        let depth = min(180, max(90, flipHostView.bounds.width * 0.18))
+        let timing = CAMediaTimingFunction(controlPoints: 0.2, 0.0, 0.2, 1.0)
+        let depth = min(160, max(80, flipHostView.bounds.width * 0.16))
 
         // Reverse flip: back goes 0 -> -pi, front goes +pi -> 0
-        let backTransforms = Self.makeFlipKeyframes(fromAngle: 0, toAngle: -.pi, maxDepth: depth)
-        let frontTransforms = Self.makeFlipKeyframes(fromAngle: .pi, toAngle: 0, maxDepth: depth)
+        let backTransforms = Self.makeFlipKeyframes(fromAngle: 0, toAngle: -.pi, maxDepth: depth, steps: 64)
+        let frontTransforms = Self.makeFlipKeyframes(fromAngle: .pi, toAngle: 0, maxDepth: depth, steps: 64)
 
         CATransaction.begin()
         CATransaction.setAnimationDuration(duration)
         CATransaction.setAnimationTimingFunction(timing)
         CATransaction.setCompletionBlock { [weak self] in
-            self?.frontCard.layer?.removeAllAnimations()
-            self?.backCard.layer?.removeAllAnimations()
-            self?.frontCard.layer?.transform = CATransform3DIdentity
-            self?.backCard.layer?.transform = CATransform3DIdentity
-            finish()
+            guard let self = self else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.backCard.isHidden = true
+            self.backCard.layer?.removeAllAnimations()
+            self.frontCard.layer?.removeAllAnimations()
+            self.backCard.dimmerLayer.removeAllAnimations()
+            self.frontCard.dimmerLayer.removeAllAnimations()
+            self.frontCard.layer?.transform = CATransform3DIdentity
+            self.backCard.layer?.transform = CATransform3DMakeRotation(-.pi, 0, 1, 0)
+            self.frontCard.layer?.opacity = 1.0
+            self.backCard.layer?.opacity = 1.0
+            self.frontCard.setDimmerOpacity(0.0)
+            self.backCard.setDimmerOpacity(0.0)
+            CATransaction.commit()
+
+            // Synchronously unhide target window, then order out immediately without frame delay
+            self.restoreTargetWindow()
+            self.orderOut(nil)
+            self.isAnimating = false
         }
 
         // Animate back card exiting (0 -> -pi)
@@ -272,18 +317,19 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         backCard.layer?.add(backAnim, forKey: "flip.transform")
 
         let backOpacity = CAKeyframeAnimation(keyPath: "opacity")
-        backOpacity.keyTimes = [0.0, 0.48, 0.52, 1.0]
+        backOpacity.keyTimes = [0.0, 0.499, 0.501, 1.0]
         backOpacity.values = [1.0, 1.0, 0.0, 0.0]
         backOpacity.duration = duration
         backOpacity.isRemovedOnCompletion = false
         backOpacity.fillMode = .forwards
         backCard.layer?.add(backOpacity, forKey: "flip.opacity")
 
-        let backDim = CABasicAnimation(keyPath: "opacity")
-        backDim.fromValue = 0.0
-        backDim.toValue = 0.35
-        backDim.duration = duration * 0.5
-        backDim.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        let backDim = CAKeyframeAnimation(keyPath: "opacity")
+        backDim.keyTimes = [0.0, 0.5, 1.0]
+        backDim.values = [0.0, 0.30, 0.30]
+        backDim.duration = duration
+        backDim.isRemovedOnCompletion = false
+        backDim.fillMode = .forwards
         backCard.dimmerLayer.add(backDim, forKey: "flip.dim")
 
         // Animate front card entering (+pi -> 0)
@@ -296,19 +342,19 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         frontCard.layer?.add(frontAnim, forKey: "flip.transform")
 
         let frontOpacity = CAKeyframeAnimation(keyPath: "opacity")
-        frontOpacity.keyTimes = [0.0, 0.48, 0.52, 1.0]
+        frontOpacity.keyTimes = [0.0, 0.499, 0.501, 1.0]
         frontOpacity.values = [0.0, 0.0, 1.0, 1.0]
         frontOpacity.duration = duration
         frontOpacity.isRemovedOnCompletion = false
         frontOpacity.fillMode = .forwards
         frontCard.layer?.add(frontOpacity, forKey: "flip.opacity")
 
-        let frontDim = CABasicAnimation(keyPath: "opacity")
-        frontDim.fromValue = 0.35
-        frontDim.toValue = 0.0
-        frontDim.beginTime = CACurrentMediaTime() + duration * 0.5
-        frontDim.duration = duration * 0.5
-        frontDim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        let frontDim = CAKeyframeAnimation(keyPath: "opacity")
+        frontDim.keyTimes = [0.0, 0.5, 1.0]
+        frontDim.values = [0.30, 0.30, 0.0]
+        frontDim.duration = duration
+        frontDim.isRemovedOnCompletion = false
+        frontDim.fillMode = .forwards
         frontCard.dimmerLayer.add(frontDim, forKey: "flip.dim")
 
         CATransaction.commit()
@@ -376,7 +422,7 @@ final class ScratchpadPanel: NSPanel, NSTextViewDelegate {
         backCard.layer?.position = center
     }
 
-    private static func makeFlipKeyframes(fromAngle: CGFloat, toAngle: CGFloat, maxDepth: CGFloat, steps: Int = 36) -> [CATransform3D] {
+    private static func makeFlipKeyframes(fromAngle: CGFloat, toAngle: CGFloat, maxDepth: CGFloat, steps: Int = 64) -> [CATransform3D] {
         var frames: [CATransform3D] = []
         for i in 0...steps {
             let t = CGFloat(i) / CGFloat(steps)
@@ -458,6 +504,7 @@ final class FrontWindowCardView: NSView {
         card.wantsLayer = true
         card.layer?.cornerRadius = 12
         card.layer?.masksToBounds = true
+        card.layer?.isDoubleSided = false
         card.layer?.borderWidth = 0.5
         card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
@@ -657,6 +704,7 @@ final class BacksideCardView: NSView {
         card.wantsLayer = true
         card.layer?.cornerRadius = 12
         card.layer?.masksToBounds = true
+        card.layer?.isDoubleSided = false
         card.layer?.borderWidth = 0.5
         card.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
